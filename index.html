@@ -161,6 +161,7 @@ var syncCfg = null;
 try { var sraw = lsOk ? window.localStorage.getItem(SYNCKEY) : null; if(sraw) syncCfg = JSON.parse(sraw); } catch(e){}
 var syncState = syncCfg ? "idle" : "off";
 var syncMsg = "";
+var syncDecryptFail = false;
 function saveSyncCfg(){ if(lsOk){ try { if(syncCfg) window.localStorage.setItem(SYNCKEY, JSON.stringify(syncCfg)); else window.localStorage.removeItem(SYNCKEY); } catch(e){} } }
 function b64(buf){ var b=""; new Uint8Array(buf).forEach(function(x){ b += String.fromCharCode(x); }); return btoa(b); }
 function unb64(s){ var bin=atob(s); var a=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return a.buffer; }
@@ -206,6 +207,7 @@ function rich(d){
 var pushTimer = null;
 function syncPush(){
   if(!syncCfg || !data) return;
+  if(syncDecryptFail){ syncState="err"; syncMsg="passphrase mismatch, not pushing"; paintSync(); return; }
   if(pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(function(){
     encryptStr(syncCfg.pass, JSON.stringify(data)).then(function(packed){
@@ -220,6 +222,7 @@ function syncPull(then){
     var f = g.files && g.files["board.json.enc"];
     if(!f || !f.content || f.content === "{}"){ syncState="ok"; paintSync(); if(then) then(false); return; }
     return decryptStr(syncCfg.pass, f.content).then(function(plain){
+      syncDecryptFail = false;
       var remote = null; try { remote = JSON.parse(plain); } catch(e){}
       if(remote && remote.tasks){
         var newer = String(remote.savedAt||"") > String((data && data.savedAt)||"");
@@ -229,7 +232,7 @@ function syncPull(then){
       }
       syncState="ok"; syncMsg=""; paintSync();
       if(then) then(true);
-    }).catch(function(){ syncState="err"; syncMsg="Could not decrypt, passphrase mismatch"; paintSync(); if(then) then(false); });
+    }).catch(function(){ syncDecryptFail = true; syncState="err"; syncMsg="Could not decrypt, passphrase mismatch"; paintSync(); if(then) then(false); });
   }).catch(function(e){ syncState="err"; syncMsg=String(e.message||e); paintSync(); if(then) then(false); });
 }
 function syncLabel(){ if(!syncCfg) return ""; if(syncState==="ok") return " · synced via GitHub"; if(syncState==="err") return " · sync error"; return " · sync pending"; }
@@ -859,12 +862,12 @@ document.addEventListener("click", function(e){
         syncCfg = { token: tok, pass: pas, gistId: gid };
         saveSyncCfg();
         syncState = "idle";
-        syncPull(function(){ syncPush(); ui.sync = false; render(); });
+        syncPull(function(){ if(!syncDecryptFail) syncPush(); ui.sync = false; render(); });
       }).catch(function(e){ ui.syncErr = "Could not reach GitHub with that token. "+String(e.message||e); render(); });
     }
   }
   else if(act==="syncpullnow"){ syncPull(function(){ render(); }); }
-  else if(act==="syncdisc"){ syncCfg = null; saveSyncCfg(); syncState = "off"; ui.sync = false; render(); }
+  else if(act==="syncdisc"){ syncCfg = null; saveSyncCfg(); syncState = "off"; syncDecryptFail = false; ui.sync = false; render(); }
   else if(act==="tradd"){
     var boxA = document.getElementById("transferbox");
     var txtA = boxA ? boxA.value : "";
