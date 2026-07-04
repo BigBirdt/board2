@@ -37,6 +37,10 @@ body { margin:0; min-height:100vh; background:var(--field); color:var(--ink);
 .savedot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--ok); margin-left:8px; vertical-align:middle; }
 .savedot.err { background:var(--over); }
 .starve { font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--warn); margin:0 0 12px; }
+.dealctl { display:flex; gap:16px; justify-content:flex-end; margin:-8px 2px 14px; }
+.ghost { background:none; border:none; padding:6px 2px; min-height:32px; font-family:'IBM Plex Mono',monospace;
+  font-size:11px; letter-spacing:0.06em; color:var(--mut); opacity:.75; }
+.ghost:hover { color:var(--acc); opacity:1; }
 .deal { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
 .next { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--acc);
   border-radius:10px; padding:16px 16px 12px; flex:1 1 300px; min-width:0; }
@@ -76,7 +80,10 @@ button { font-family:'Inter',sans-serif; cursor:pointer; }
   background:var(--card); padding:0; }
 .circ:hover { border-color:var(--acc); }
 .circ.did { border-color:var(--ok); background:var(--ok); }
-.rowbody { flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; font-size:15px; color:var(--ink); }
+.rowbody { flex:1; min-width:0; text-align:left; background:none; border:none; padding:0; font-size:15px; color:var(--ink); cursor:pointer; }
+.ract { display:flex; gap:8px; margin-top:9px; }
+.rbtn { font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:7px 11px; min-height:34px; border:1px solid var(--line); background:var(--field); color:var(--mut); border-radius:7px; }
+.rbtn.on { border-color:var(--acc); color:var(--acc); background:var(--accSoft); }
 .rttl { font-weight:600; font-size:14.5px; }
 .done .rttl { text-decoration:line-through; color:var(--mut); font-weight:500; }
 .rfirst { font-size:13.5px; color:var(--mut); margin-top:3px; line-height:1.45; }
@@ -282,6 +289,14 @@ function migrate(d){
   if(!d.unknowns) d.unknowns = [];
   if(!d.recurring) d.recurring = [];
   if(!d.prefs) d.prefs = { dealTwo:false };
+  var g2c = { nav:"campaign", inside:"money", outside:"money", vehicles:"vehicles", money:"money", rhythm:"health" };
+  d.recurring.forEach(function(r){ if(!r.cat) r.cat = (r.id==="r2" ? "general" : (g2c[r.group] || "general")); });
+  ["t31","t32","t33","t34"].forEach(function(idd){
+    for(var i=0;i<d.tasks.length;i++){
+      if(d.tasks[i].id===idd){ var t=d.tasks[i]; t.repeat = true;
+        if(t.status==="done"){ t.status="open"; t.lastDone = t.doneAt || todayISO(); t.doneAt = null; } }
+    }
+  });
   d.tasks.forEach(function(t){ if(OLDCATS[t.cat]) t.cat = OLDCATS[t.cat]; if(!t.needs) t.needs = ID2NEEDS[t.id] || CAT2NEEDS[t.cat] || []; });
 }
 
@@ -315,17 +330,20 @@ function waitingTasks(){ return data.tasks.filter(function(t){ return t.status==
 function doneTasks(){ return data.tasks.filter(function(t){ return t.status==="done"; })
   .sort(function(a,b){ return String(b.doneAt||"").localeCompare(String(a.doneAt||"")); }); }
 function eligible(){ var today = todayISO(); return openTasks().filter(function(t){ return t.snooze !== today; }); }
-function deadlinePick(){
-  var c = eligible().slice();
+function effDue(t){ return (t.today === todayISO()) ? todayISO() : t.due; }
+function deadlineList(){
+  var c = poolItems();
   c.sort(function(a,b){
-    var da = a.due ? daysUntil(a.due) : 9999, db = b.due ? daysUntil(b.due) : 9999;
+    var ea = effDue(a), eb = effDue(b);
+    var da = ea ? daysUntil(ea) : 9999, db = eb ? daysUntil(eb) : 9999;
     var oa = da<0?-1:0, ob = db<0?-1:0;
     if(oa!==ob) return oa-ob;
     if(da!==db) return da-db;
     return (a.pri||99)-(b.pri||99);
   });
-  return c[0] || null;
+  return c;
 }
+function deadlinePick(){ var l = deadlineList(); return l[0] || null; }
 function starvingNeeds(){
   return data.needs.map(function(n){
     var ago = n.lastFed ? daysAgo(n.lastFed) : 999;
@@ -339,7 +357,7 @@ function feedPick(excludeId){
   }).sort(function(a,b){ return b.hunger - a.hunger; });
   var cands = [];
   order.forEach(function(o){
-    eligible().filter(function(t){ return t.id !== excludeId && (t.needs||[]).indexOf(o.n.id) >= 0; })
+    poolItems().filter(function(t){ return t.id !== excludeId && (t.needs||[]).indexOf(o.n.id) >= 0; })
       .sort(function(a,b){ return (a.pri||99)-(b.pri||99); })
       .forEach(function(t){ if(cands.indexOf(t) < 0) cands.push(t); });
   });
@@ -348,6 +366,24 @@ function feedPick(excludeId){
 }
 function feedNeeds(t){
   (t.needs||[]).forEach(function(nid){ var n = needBy(nid); if(n) n.lastFed = todayISO(); });
+}
+function wrapRec(r){
+  var td = todayISO();
+  var d = recNextDue(r);
+  var due = (r.today === td) ? td : d;
+  return { rec:true, rid:r.id, id:"r:"+r.id, cat:(r.cat||"general"), title:r.title, first:(r.note||r.every), note:"",
+    due:due, today:r.today, pri:40, needs:(CAT2NEEDS[r.cat]||[]), snoozeCount:0, url:null, status:"open" };
+}
+function poolItems(){
+  var td = todayISO();
+  var pool = eligible().slice();
+  data.recurring.forEach(function(r){
+    if(r.snooze === td) return;
+    var w = wrapRec(r);
+    if(!w.due) return;
+    pool.push(w);
+  });
+  return pool;
 }
 
 /* ---------- html builders ---------- */
@@ -361,19 +397,26 @@ function dueTagHtml(t){
 function catLabel(id){ for(var i=0;i<CATS.length;i++) if(CATS[i].id===id) return CATS[i].label; return id; }
 function dealCard(t, kind){
   var cls = kind==="feed" ? "next feed" : "next";
-  var eyebrow = kind==="feed"
-    ? "Feed · " + (t.needs||[]).map(function(nid){ var n=needBy(nid); return n?n.name:nid; }).join(" and ")
+  var eyebrow = kind==="pin" ? "Pinned"
+    : kind==="feed"
+    ? "Feeds " + (t.needs||[]).map(function(nid){ var n=needBy(nid); return n?n.name:nid; }).join(" and ")
     : "Next by date";
   var h = '<div class="'+cls+'">';
   h += '<div class="eyebrow">'+esc(eyebrow)+'</div>';
   h += '<div class="ttl">'+esc(catLabel(t.cat))+' · '+esc(t.title)+'</div>';
   h += '<div class="act">'+esc(t.first)+'</div>';
   if(t.note) h += '<div class="nnote">'+esc(t.note)+'</div>';
-  h += '<div class="nbtns"><button class="bp" data-act="complete" data-id="'+t.id+'">Done</button>';
-  h += '<button class="bs" data-act="snooze" data-id="'+t.id+'">Not today</button>';
-  h += '<button class="bs" data-act="editnext" data-id="'+t.id+'" style="opacity:.6">Edit</button>';
-  if(t.url) h += '<a class="alink" href="'+esc(t.url)+'" target="_blank" rel="noreferrer">Open the link</a>';
+  if(t.rec){
+    h += '<div class="nbtns"><button class="bp" data-act="recdone" data-id="'+t.rid+'">Done</button>';
+    h += '<button class="bs" data-act="rec-snooze" data-id="'+t.rid+'">Not today</button>';
+  } else {
+    h += '<div class="nbtns"><button class="bp" data-act="complete" data-id="'+t.id+'">Done</button>';
+    h += '<button class="bs" data-act="snooze" data-id="'+t.id+'">Not today</button>';
+    h += '<button class="bs" data-act="editnext" data-id="'+t.id+'" style="opacity:.6">Edit</button>';
+    if(t.url) h += '<a class="alink" href="'+esc(t.url)+'" target="_blank" rel="noreferrer">Open the link</a>';
+  }
   h += dueTagHtml(t);
+  if(t.today===todayISO() && !t.due) h += '<span class="tag link">today</span>';
   if((t.snoozeCount||0)>=3) h += '<span class="tag due1">not today ×'+t.snoozeCount+'</span>';
   h += '</div></div>';
   return h;
@@ -383,15 +426,26 @@ function rowHtml(t){
   var h = '<div class="row'+(isDone?' done':'')+'">';
   h += '<div class="rowmain">';
   h += '<button class="circ'+(isDone?' did':'')+'" data-act="'+(isDone?'reopen':'complete')+'" data-id="'+t.id+'" aria-label="'+(isDone?'Reopen':'Mark done')+'"></button>';
-  h += '<button class="rowbody" data-act="expand" data-id="'+t.id+'">';
+  h += '<div class="rowbody" data-act="expand" data-id="'+t.id+'" role="button">';
   h += '<div class="rttl">'+esc(t.title)+'</div>';
   h += '<div class="rfirst">'+esc(t.first)+'</div>';
   h += '<div class="badges"><span class="tag">'+esc(t.mode)+'</span>'+dueTagHtml(t);
   (t.needs||[]).forEach(function(nid){ var n=needBy(nid); if(n) h += '<span class="tag">'+esc(n.name)+'</span>'; });
+  if(t.today===todayISO()) h += '<span class="tag link">today</span>';
+  if(t.repeat) h += '<span class="tag">repeats'+(t.lastDone?' · last '+esc(shortDate(t.lastDone)):'')+'</span>';
+  if(data.pinId===t.id) h += '<span class="tag link">pinned</span>';
   if(t.status==="waiting") h += '<span class="tag wait">waiting · '+esc(t.waitingOn||"someone else")+'</span>';
   if((t.snoozeCount||0)>=2) h += '<span class="tag due1">not today ×'+t.snoozeCount+'</span>';
   if(t.url) h += '<span class="tag link">link</span>';
-  h += '</div></button></div>';
+  h += '</div>';
+  if(t.status === "open"){
+    var isToday = t.today === todayISO();
+    h += '<div class="ract">';
+    h += '<button class="rbtn'+(isToday?' on':'')+'" data-act="today-toggle" data-id="'+t.id+'">'+(isToday?'On today':'Add to today')+'</button>';
+    h += '<button class="rbtn'+(data.pinId===t.id?' on':'')+'" data-act="'+(data.pinId===t.id?'unpin':'pin')+'" data-id="'+t.id+'">'+(data.pinId===t.id?'Pinned':'Up next')+'</button>';
+    h += '</div>';
+  }
+  h += '</div></div>';
   if(ui.expanded === t.id){
     h += '<div class="edit">';
     if(t.note) h += '<div class="enote">'+esc(t.note)+'</div>';
@@ -404,6 +458,8 @@ function rowHtml(t){
     h += '<label>Mode</label><select data-change="mode" data-id="'+t.id+'">';
     MODES.forEach(function(m){ h += '<option value="'+m+'"'+(t.mode===m?' selected':'')+'>'+m+'</option>'; });
     h += '</select>';
+    h += '<label>Repeats, done stamps it instead of closing it</label><select data-change="repeatSel" data-id="'+t.id+'">';
+    h += '<option value="no"'+(!t.repeat?' selected':'')+'>no</option><option value="yes"'+(t.repeat?' selected':'')+'>yes</option></select>';
     h += '<label>Category</label><select data-change="cat" data-id="'+t.id+'">';
     CATS.forEach(function(c){ h += '<option value="'+c.id+'"'+(t.cat===c.id?' selected':'')+'>'+esc(c.label)+'</option>'; });
     h += '</select>';
@@ -415,6 +471,9 @@ function rowHtml(t){
       h += '<label>Waiting on</label><input type="text" data-field="waitingOn" data-id="'+t.id+'" value="'+esc(t.waitingOn||"")+'">';
     }
     h += '<div class="editbtns">';
+    h += (data.pinId===t.id
+      ? '<button class="bs" data-act="unpin" data-id="'+t.id+'">Unpin</button>'
+      : '<button class="bp" data-act="pin" data-id="'+t.id+'">Put this up next</button>');
     if(t.snooze === todayISO() && t.status === "open") h += '<button class="bp" data-act="unsnooze" data-id="'+t.id+'">Bring it back today</button>';
     h += '<button class="bs" data-act="collapse">Close</button>';
     h += (ui.confirmDel===t.id
@@ -423,6 +482,24 @@ function rowHtml(t){
     h += '</div></div>';
   }
   h += '</div>';
+  return h;
+}
+function recSlimHtml(r){
+  var nd = recNextDue(r), td = todayISO();
+  var h = '<div class="row"><div class="rowmain" style="align-items:center">';
+  h += '<button class="circ" data-act="recdone" data-id="'+r.id+'" aria-label="Done today"></button>';
+  h += '<div class="rowbody" style="cursor:default">';
+  h += '<div class="rttl" style="font-weight:500;color:var(--mut)">'+esc(r.title)+'</div>';
+  h += '<div class="badges"><span class="tag">'+esc(r.every)+'</span>';
+  if(nd){ var n = daysUntil(nd); var cls = n<0 ? 'tag due0' : n<=7 ? 'tag due1' : 'tag'; h += '<span class="'+cls+'">'+esc(fmtDate(nd))+'</span>'; }
+  if(r.today===td) h += '<span class="tag link">today</span>';
+  if(data.pinId==="r:"+r.id) h += '<span class="tag link">pinned</span>';
+  h += '</div>';
+  h += '<div class="ract">';
+  h += '<button class="rbtn'+(r.today===td?' on':'')+'" data-act="rec-today" data-id="'+r.id+'">'+(r.today===td?'On today':'Add to today')+'</button>';
+  var rp = data.pinId==="r:"+r.id;
+  h += '<button class="rbtn'+(rp?' on':'')+'" data-act="'+(rp?'rec-unpin':'rec-pin')+'" data-id="'+r.id+'">'+(rp?'Pinned':'Up next')+'</button>';
+  h += '</div></div></div></div>';
   return h;
 }
 function recNextDue(r){
@@ -447,10 +524,45 @@ function recRowHtml(r){
   h += '<input class="rdate" type="date" data-change="rec" data-id="'+r.id+'" value="'+esc(r.lastDone||"")+'">';
   h += '<span class="rdue" style="color:'+col+'">'+(nd ? (n<0 ? Math.abs(n)+"d over" : "due "+esc(fmtDate(nd))) : "no date yet")+'</span>';
   h += '<button class="bmini" data-act="recdone" data-id="'+r.id+'">Done today</button>';
+  var isTd = r.today === todayISO(), isPn = data.pinId === "r:"+r.id;
+  h += '<button class="rbtn'+(isTd?' on':'')+'" data-act="rec-today" data-id="'+r.id+'">'+(isTd?'On today':'Add to today')+'</button>';
+  h += '<button class="rbtn'+(isPn?' on':'')+'" data-act="'+(isPn?'rec-unpin':'rec-pin')+'" data-id="'+r.id+'">'+(isPn?'Pinned':'Up next')+'</button>';
   if(ui.confirmDel === "rec:"+r.id) h += '<button class="bdanger" data-act="recdel-yes" data-id="'+r.id+'" style="min-height:38px;padding:8px 12px">sure?</button>';
   else h += '<button class="bs" data-act="recdel-ask" data-id="'+r.id+'" aria-label="Delete" style="min-height:38px;min-width:38px;padding:8px 12px">×</button>';
   h += '</div>';
   return h;
+}
+function mergeItems(pk){
+  var inT = Array.isArray(pk) ? pk : (pk.tasks || []);
+  var inR = Array.isArray(pk) ? [] : (pk.recurring || []);
+  var added = 0, updated = 0;
+  inT.forEach(function(nt){
+    if(!nt || !nt.id) return;
+    var mc = OLDCATS[nt.cat] || nt.cat;
+    if(!CAT2NEEDS.hasOwnProperty(mc)) mc = "general";
+    var ex = task(nt.id);
+    if(ex){
+      ["title","first","note","due","mode","url","waitingOn","pri","repeat"].forEach(function(k){ if(nt[k]!==undefined) ex[k]=nt[k]; });
+      if(nt.cat!==undefined) ex.cat = mc;
+      if(nt.needs!==undefined) ex.needs = nt.needs;
+      if(nt.status!==undefined) ex.status = nt.status;
+      updated++;
+    } else {
+      data.tasks.push({ id:nt.id, cat:mc, pri:nt.pri||30, mode:nt.mode||"decide", status:nt.status||"open",
+        due:nt.due||null, title:nt.title||"", first:nt.first||"", note:nt.note||"", url:nt.url,
+        waitingOn:nt.waitingOn, repeat:!!nt.repeat, snoozeCount:0,
+        needs: nt.needs || ID2NEEDS[nt.id] || CAT2NEEDS[mc] || [] });
+      added++;
+    }
+  });
+  inR.forEach(function(nr){
+    if(!nr || !nr.id) return;
+    var exr = rec(nr.id);
+    if(exr){ ["title","every","days","anchor","note","group","cat"].forEach(function(k){ if(nr[k]!==undefined) exr[k]=nr[k]; }); updated++; }
+    else { data.recurring.push({ id:nr.id, title:nr.title||"", every:nr.every||"monthly", days:nr.days||30,
+      anchor:nr.anchor, lastDone:nr.lastDone||null, note:nr.note||"", group:nr.group||"rhythm", cat:nr.cat||"general" }); added++; }
+  });
+  return { added:added, updated:updated };
 }
 function exportText(){
   var L = [];
@@ -496,39 +608,67 @@ function render(){
   h += '<span id="savedot" class="savedot'+(storageOk?'':' err')+'"></span></div>';
   if(!storageOk) h += '<div class="banner">Saving is failing on this device. Export as text before closing so nothing is lost.</div>';
 
+  if(ui.inbox){
+    var items = Array.isArray(ui.inbox) ? ui.inbox : (ui.inbox.tasks||[]).concat(ui.inbox.recurring||[]);
+    h += '<div class="row" style="border-left:4px solid var(--acc);margin-bottom:14px"><div class="edit" style="border-top:none">';
+    h += '<div class="enote">Claude sent '+items.length+' item'+(items.length===1?'':'s')+': '+esc(items.map(function(i){ return i.title||""; }).join(", "))+'</div>';
+    h += '<div class="editbtns"><button class="bp" data-act="inbox-add">Add to the board</button><button class="bs" data-act="inbox-no">Ignore</button></div>';
+    h += '</div></div>';
+  }
+  if(ui.inboxDone) h += '<div class="empty" style="padding:0 2px 10px">'+esc(ui.inboxDone)+'</div>';
   var sn = starvingNeeds();
   if(sn.length){
     h += '<div class="starve">Hungry: '+sn.map(function(x){ return x.n.name+" ("+x.over+"d past window)"; }).join(" · ")+'</div>';
   }
 
   var two = !!(data.prefs && data.prefs.dealTwo);
-  var A = deadlinePick();
-  var B = two ? (A ? feedPick(A.id) : feedPick(null)) : null;
-  var solo = two ? null : (A || feedPick(null));
+  var pinT = null;
+  if(data.pinId){
+    if(String(data.pinId).indexOf("r:") === 0){
+      var pr = rec(String(data.pinId).slice(2));
+      if(pr && pr.snooze !== todayISO()) pinT = wrapRec(pr);
+      else data.pinId = null;
+    } else {
+      pinT = task(data.pinId);
+      if(pinT && (pinT.status !== "open" || pinT.snooze === todayISO())){ pinT = null; data.pinId = null; }
+    }
+  }
+  var dl = deadlineList();
+  var A = dl[0] || null;
+  var B = null, solo = null;
+  if(two){
+    if(pinT){ B = (A && A.id !== pinT.id) ? A : feedPick(pinT.id); A = pinT; }
+    else { B = A ? feedPick(A.id) : feedPick(null); }
+  } else {
+    solo = pinT || (dl.length ? dl[(ui.dealSkip||0) % dl.length] : feedPick(null));
+  }
+  var canRedeal = !pinT && (two ? !!B : dl.length > 1);
   var quiet = '<div class="next"><div class="eyebrow">Next</div><div class="act">Nothing open, or everything is snoozed or waiting. The board is quiet.</div></div>';
   h += '<div class="deal">';
   if(two){
-    if(A) h += dealCard(A, "date");
+    if(A) h += dealCard(A, (pinT && A.id === pinT.id) ? "pin" : "date");
     if(B && (!A || B.id !== A.id)) h += dealCard(B, "feed");
     if(!A && !B) h += quiet;
   } else {
-    if(solo) h += dealCard(solo, (A && solo.id === A.id) ? "date" : "feed");
+    if(solo) h += dealCard(solo, (pinT && solo.id === pinT.id) ? "pin" : (A && solo.id === A.id) ? "date" : "feed");
     else h += quiet;
   }
   h += '</div>';
-  h += '<div style="margin:-6px 0 14px;display:flex;gap:8px">';
-  if(two && B) h += '<button class="bs" data-act="redeal" style="min-height:36px;padding:7px 12px;font-size:13px">Deal me a different one</button>';
-  h += '<button class="bs" data-act="dealmode" style="min-height:36px;padding:7px 12px;font-size:13px">'+(two ? "One card" : "Two cards")+'</button>';
+  h += '<div class="dealctl">';
+  if((ui.dealSkip||0) > 0) h += '<button class="ghost" data-act="redeal0">back to the first deal</button>';
+  if(canRedeal) h += '<button class="ghost" data-act="redeal">deal me a different one</button>';
+  h += '<button class="ghost" data-act="dealmode">'+(two ? "one card" : "two cards")+'</button>';
   h += '</div>';
 
-  var dated = open.filter(function(t){ return t.due; }).sort(function(a,b){ return a.due.localeCompare(b.due); }).slice(0,4);
+  var dated = poolItems().map(function(t){ return { t:t, e:effDue(t) }; }).filter(function(x){ return x.e; })
+    .sort(function(a,b){ return a.e.localeCompare(b.e); }).slice(0,4);
   if(dated.length){
     h += '<div class="strip">';
-    dated.forEach(function(t){
-      var n = daysUntil(t.due);
+    dated.forEach(function(x){
+      var n = daysUntil(x.e);
       var col = n<0 ? "var(--over)" : n<=3 ? "var(--warn)" : "var(--mut)";
       var word = n<0 ? Math.abs(n)+"d over" : n===0 ? "today" : n===1 ? "tomorrow" : n+"d";
-      h += '<div class="striprow"><span class="d">'+esc(shortDate(t.due))+'</span><span class="n">'+esc(t.title)+'</span><span class="left" style="color:'+col+'">'+word+'</span></div>';
+      h += '<div class="striprow"><span class="d">'+esc(shortDate(x.e))+'</span><span class="n">'+esc(x.t.title)+'</span><span class="left" style="color:'+col+'">'+word+'</span></div>';
     });
     h += '</div>';
   }
@@ -563,6 +703,7 @@ function render(){
     h += '<textarea id="transferbox" style="width:100%;min-height:140px;font-family:\'IBM Plex Mono\',monospace;font-size:11px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--soft);color:var(--ink)" placeholder="Paste board data here, or fill from this device.">'+esc(ui.transferText||"")+'</textarea>';
     h += '<div class="editbtns" style="margin:8px 0 4px"><button class="bs" data-act="trfill">Fill with this device\'s data</button>';
     h += (ui.confirmDel==="transfer" ? '<button class="bdanger" data-act="trreplace">Really replace this device?</button>' : '<button class="bs" data-act="trreplace">Replace this device with pasted data</button>');
+    h += '<button class="bs" data-act="tradd">Add pasted items</button>';
     h += '</div>';
     if(ui.transferErr) h += '<div class="empty" style="color:var(--over)">'+esc(ui.transferErr)+'</div>';
   }
@@ -577,9 +718,15 @@ function render(){
   CATS.forEach(function(c){
     var list = open.filter(function(t){ return t.cat===c.id && (ui.filter==="all" || t.mode===ui.filter); })
       .sort(function(a,b){ return (a.pri||99)-(b.pri||99); });
-    if(!list.length) return;
-    h += '<div class="sec"><button class="sechdr" data-act="cat" data-id="'+c.id+'"><span>'+esc(c.label)+'</span><span class="cnt">'+list.length+' '+(ui.open[c.id]?'−':'+')+'</span></button>';
-    if(ui.open[c.id]){ h += '<div class="rows">'; list.forEach(function(t){ h += rowHtml(t); }); h += '</div>'; }
+    var recs = (ui.filter==="all") ? data.recurring.filter(function(r){ return (r.cat||"general")===c.id; }) : [];
+    if(!list.length && !recs.length) return;
+    h += '<div class="sec"><button class="sechdr" data-act="cat" data-id="'+c.id+'"><span>'+esc(c.label)+'</span><span class="cnt">'+(list.length+recs.length)+' '+(ui.open[c.id]?'−':'+')+'</span></button>';
+    if(ui.open[c.id]){
+      h += '<div class="rows">';
+      list.forEach(function(t){ h += rowHtml(t); });
+      recs.forEach(function(r){ h += recSlimHtml(r); });
+      h += '</div>';
+    }
     h += '</div>';
   });
 
@@ -665,9 +812,16 @@ document.addEventListener("click", function(e){
   if(!el) return;
   var act = el.getAttribute("data-act");
   var id = el.getAttribute("data-id");
-  if(act==="complete"){ var t=task(id); if(t){ t.status="done"; t.doneAt=todayISO(); feedNeeds(t); persist(); render(); } }
+  if(act==="complete"){ var t=task(id); if(t){
+    if(t.repeat){ t.lastDone = todayISO(); t.today = null; t.snooze = todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
+    else { t.status="done"; t.doneAt=todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
+    ui.dealSkip = 0;
+    persist(); render(); } }
   else if(act==="reopen"){ var t2=task(id); if(t2){ t2.status="open"; t2.doneAt=null; persist(); render(); } }
-  else if(act==="snooze"){ var t3=task(id); if(t3){ t3.snooze=todayISO(); t3.snoozeCount=(t3.snoozeCount||0)+1; persist(); render(); } }
+  else if(act==="snooze"){ var t3=task(id); if(t3){ t3.snooze=todayISO(); t3.snoozeCount=(t3.snoozeCount||0)+1; if(data.pinId===id) data.pinId=null; ui.dealSkip=0; persist(); render(); } }
+  else if(act==="pin"){ data.pinId = id; ui.expanded=null; persist(); render(); }
+  else if(act==="today-toggle"){ var tt=task(id); if(tt){ var td=todayISO(); if(tt.today===td){ tt.today=null; } else { tt.today=td; if(tt.snooze===td) tt.snooze=null; } persist(); render(); } }
+  else if(act==="unpin"){ data.pinId = null; persist(); render(); }
   else if(act==="unsnooze"){ var tu=task(id); if(tu){ if(tu.snooze===todayISO() && tu.snoozeCount) tu.snoozeCount = tu.snoozeCount-1; tu.snooze=null; persist(); render(); } }
   else if(act==="redeal"){ ui.dealSkip = (ui.dealSkip||0)+1; render(); }
   else if(act==="dealmode"){ data.prefs = data.prefs || {}; data.prefs.dealTwo = !data.prefs.dealTwo; persist(); render(); }
@@ -711,6 +865,28 @@ document.addEventListener("click", function(e){
   }
   else if(act==="syncpullnow"){ syncPull(function(){ render(); }); }
   else if(act==="syncdisc"){ syncCfg = null; saveSyncCfg(); syncState = "off"; ui.sync = false; render(); }
+  else if(act==="tradd"){
+    var boxA = document.getElementById("transferbox");
+    var txtA = boxA ? boxA.value : "";
+    try {
+      var pk = JSON.parse(txtA);
+      var res = mergeItems(pk);
+      ui.transferErr = "Added "+res.added+", updated "+res.updated+".";
+      migrate(data); persist(); render();
+    } catch(err){ ui.transferErr = "Could not read that as items."; render(); }
+  }
+  else if(act==="inbox-add"){
+    if(ui.inbox){
+      try {
+        var res2 = mergeItems(ui.inbox);
+        migrate(data); persist();
+        ui.inboxDone = "Added "+res2.added+", updated "+res2.updated+".";
+      } catch(e){ ui.inboxDone = "Could not read those items."; }
+      ui.inbox = null; render();
+      setTimeout(function(){ ui.inboxDone = null; render(); }, 4000);
+    }
+  }
+  else if(act==="inbox-no"){ ui.inbox = null; render(); }
   else if(act==="editnext"){ var te=task(id); if(te){ ui.whole=true; ui.open[te.cat]=true; ui.expanded=id; render(); } }
   else if(act==="add-open"){ ui.showAdd=true; render(); }
   else if(act==="add-cancel"){ ui.showAdd=false; render(); }
@@ -724,7 +900,12 @@ document.addEventListener("click", function(e){
       ui.showAdd = false; persist(); render();
     }
   }
-  else if(act==="recdone"){ var r=rec(id); if(r){ r.lastDone=todayISO(); persist(); render(); } }
+  else if(act==="recdone"){ var r=rec(id); if(r){ r.lastDone=todayISO(); r.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; persist(); render(); } }
+  else if(act==="rec-snooze"){ var rs=rec(id); if(rs){ rs.snooze=todayISO(); rs.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; persist(); render(); } }
+  else if(act==="rec-today"){ var rt=rec(id); if(rt){ var td2=todayISO(); if(rt.today===td2){ rt.today=null; } else { rt.today=td2; if(rt.snooze===td2) rt.snooze=null; } persist(); render(); } }
+  else if(act==="rec-pin"){ data.pinId = "r:"+id; persist(); render(); }
+  else if(act==="rec-unpin"){ data.pinId = null; persist(); render(); }
+  else if(act==="redeal0"){ ui.dealSkip = 0; render(); }
   else if(act==="recdel-ask"){ ui.confirmDel="rec:"+id; render(); }
   else if(act==="recdel-yes"){ data.recurring = data.recurring.filter(function(r){ return r.id!==id; }); ui.confirmDel=null; persist(); render(); }
   else if(act==="onimport"){
@@ -761,16 +942,29 @@ document.addEventListener("change", function(e){
   if(c==="rec"){ var r=rec(el.getAttribute("data-id")); if(r){ r.lastDone=el.value||null; persist(); render(); } return; }
   var t=task(el.getAttribute("data-id"));
   if(!t) return;
+  if(c==="repeatSel"){ t.repeat = (el.value==="yes"); persist(); render(); return; }
   if(c==="due") t.due = el.value || null;
   else t[c] = el.value;
   persist(); render();
 });
 
 /* ---------- init ---------- */
+function readHashInbox(){
+  try {
+    var mh = location.hash.match(/^#add=(.+)$/);
+    if(!mh) return;
+    var b = mh[1].replace(/-/g,"+").replace(/_/g,"/");
+    while(b.length % 4) b += "=";
+    var bytes = Uint8Array.from(atob(b), function(ch){ return ch.charCodeAt(0); });
+    ui.inbox = JSON.parse(new TextDecoder().decode(bytes));
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch(e){ ui.inbox = null; }
+}
 (function init(){
   var raw = storeGet();
   if(raw){ try { data = JSON.parse(raw); } catch(e){ data = null; } }
   if(data){ migrate(data); }
+  readHashInbox();
   render();
   if(syncCfg) syncPull();
   document.addEventListener("visibilitychange", function(){
