@@ -217,7 +217,8 @@ function syncPull(then){
       if(remote && remote.tasks){
         var newer = String(remote.savedAt||"") > String((data && data.savedAt)||"");
         var guardOk = !(data && rich(remote) === 0 && rich(data) > 0);
-        if(!data || (newer && guardOk)){ data = remote; migrate(data); storeSet(JSON.stringify(data)); render(); }
+        var localEmpty = data && rich(data) === 0 && rich(remote) > 0;
+        if(!data || localEmpty || (newer && guardOk)){ data = remote; migrate(data); storeSet(JSON.stringify(data)); render(); }
       }
       syncState="ok"; syncMsg=""; paintSync();
       if(then) then(true);
