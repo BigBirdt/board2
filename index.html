@@ -43,7 +43,10 @@ body { margin:0; min-height:100vh; background:var(--field); color:var(--ink);
 .ghost:hover { color:var(--acc); opacity:1; }
 .deal { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
 .next { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--acc);
-  border-radius:10px; padding:16px 16px 12px; flex:1 1 300px; min-width:0; }
+  border-radius:10px; padding:16px 16px 12px; flex:1 1 300px; min-width:0; position:relative; }
+.demote { position:absolute; top:8px; right:8px; background:none; border:none; font-family:'IBM Plex Mono',monospace;
+  font-size:15px; color:var(--mut); opacity:.55; min-width:32px; min-height:32px; padding:4px; }
+.demote:hover { color:var(--acc); opacity:1; }
 .next.feed { border-left-color:var(--warn); }
 .next .eyebrow { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em;
   text-transform:uppercase; color:var(--acc); margin-bottom:2px; }
@@ -344,7 +347,18 @@ function deadlineList(){
     if(da!==db) return da-db;
     return (a.pri||99)-(b.pri||99);
   });
+  applyDemotes(c);
   return c;
+}
+function applyDemotes(list){
+  var dm = data.demote;
+  if(!dm || dm.d !== todayISO() || !dm.seq || !dm.seq.length) return list;
+  dm.seq.forEach(function(id){
+    var i = -1;
+    for(var k=0;k<list.length;k++){ if(list[k].id===id){ i = k; break; } }
+    if(i >= 0 && i < list.length - 1){ var x = list.splice(i,1)[0]; list.splice(i+1,0,x); }
+  });
+  return list;
 }
 function deadlinePick(){ var l = deadlineList(); return l[0] || null; }
 function starvingNeeds(){
@@ -405,6 +419,7 @@ function dealCard(t, kind){
     ? "Feeds " + (t.needs||[]).map(function(nid){ var n=needBy(nid); return n?n.name:nid; }).join(" and ")
     : "Next by date";
   var h = '<div class="'+cls+'">';
+  if(kind==="date" && deadlineList().length > 1) h += '<button class="demote" data-act="demote" data-id="'+t.id+'" aria-label="Put this behind the next one" title="Put this behind the next one">\u2193</button>';
   h += '<div class="eyebrow">'+esc(eyebrow)+'</div>';
   h += '<div class="ttl">'+esc(catLabel(t.cat))+' · '+esc(t.title)+'</div>';
   h += '<div class="act">'+esc(t.first)+'</div>';
@@ -909,6 +924,12 @@ document.addEventListener("click", function(e){
   else if(act==="rec-pin"){ data.pinId = "r:"+id; persist(); render(); }
   else if(act==="rec-unpin"){ data.pinId = null; persist(); render(); }
   else if(act==="redeal0"){ ui.dealSkip = 0; render(); }
+  else if(act==="demote"){
+    if(!data.demote || data.demote.d !== todayISO()) data.demote = { d: todayISO(), seq: [] };
+    data.demote.seq.push(id);
+    ui.dealSkip = 0;
+    persist(); render();
+  }
   else if(act==="recdel-ask"){ ui.confirmDel="rec:"+id; render(); }
   else if(act==="recdel-yes"){ data.recurring = data.recurring.filter(function(r){ return r.id!==id; }); ui.confirmDel=null; persist(); render(); }
   else if(act==="onimport"){
