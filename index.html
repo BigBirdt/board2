@@ -295,6 +295,7 @@ function migrate(d){
   if(!d.unknowns) d.unknowns = [];
   if(!d.recurring) d.recurring = [];
   if(!d.prefs) d.prefs = { dealTwo:false };
+  if(d.demote) delete d.demote;
   var g2c = { nav:"campaign", inside:"money", outside:"money", vehicles:"vehicles", money:"money", rhythm:"health" };
   d.recurring.forEach(function(r){ if(!r.cat) r.cat = (r.id==="r2" ? "general" : (g2c[r.group] || "general")); });
   ["t31","t32","t33","t34"].forEach(function(idd){
@@ -347,18 +348,7 @@ function deadlineList(){
     if(da!==db) return da-db;
     return (a.pri||99)-(b.pri||99);
   });
-  applyDemotes(c);
   return c;
-}
-function applyDemotes(list){
-  var dm = data.demote;
-  if(!dm || dm.d !== todayISO() || !dm.seq || !dm.seq.length) return list;
-  dm.seq.forEach(function(id){
-    var i = -1;
-    for(var k=0;k<list.length;k++){ if(list[k].id===id){ i = k; break; } }
-    if(i >= 0 && i < list.length - 1){ var x = list.splice(i,1)[0]; list.splice(i+1,0,x); }
-  });
-  return list;
 }
 function deadlinePick(){ var l = deadlineList(); return l[0] || null; }
 function starvingNeeds(){
@@ -419,7 +409,7 @@ function dealCard(t, kind){
     ? "Feeds " + (t.needs||[]).map(function(nid){ var n=needBy(nid); return n?n.name:nid; }).join(" and ")
     : "Next by date";
   var h = '<div class="'+cls+'">';
-  if(kind==="date" && deadlineList().length > 1) h += '<button class="demote" data-act="demote" data-id="'+t.id+'" aria-label="Put this behind the next one" title="Put this behind the next one">\u2193</button>';
+  if(kind==="date" && deadlineList().length > 1) h += '<button class="demote" data-act="walknext" data-id="'+t.id+'" aria-label="Next in today\'s queue" title="Next in today\'s queue">\u2193</button>';
   h += '<div class="eyebrow">'+esc(eyebrow)+'</div>';
   h += '<div class="ttl">'+esc(catLabel(t.cat))+' · '+esc(t.title)+'</div>';
   h += '<div class="act">'+esc(t.first)+'</div>';
@@ -652,15 +642,16 @@ function render(){
     }
   }
   var dl = deadlineList();
-  var A = dl[0] || null;
+  var wOff = (data.walk && data.walk.d === todayISO()) ? (data.walk.offset||0) : 0;
+  var A = dl.length ? dl[wOff % dl.length] : null;
   var B = null, solo = null;
   if(two){
     if(pinT){ B = (A && A.id !== pinT.id) ? A : feedPick(pinT.id); A = pinT; }
     else { B = A ? feedPick(A.id) : feedPick(null); }
   } else {
-    solo = pinT || (dl.length ? dl[(ui.dealSkip||0) % dl.length] : feedPick(null));
+    solo = pinT || A || feedPick(null);
   }
-  var canRedeal = !pinT && (two ? !!B : dl.length > 1);
+  var canRedeal = !pinT && two && !!B;
   var quiet = '<div class="next"><div class="eyebrow">Next</div><div class="act">Nothing open, or everything is snoozed or waiting. The board is quiet.</div></div>';
   h += '<div class="deal">';
   if(two){
@@ -673,6 +664,7 @@ function render(){
   }
   h += '</div>';
   h += '<div class="dealctl">';
+  if(wOff > 0 && !pinT) h += '<button class="ghost" data-act="walk0">back to the first</button>';
   if((ui.dealSkip||0) > 0) h += '<button class="ghost" data-act="redeal0">back to the first deal</button>';
   if(canRedeal) h += '<button class="ghost" data-act="redeal">deal me a different one</button>';
   h += '<button class="ghost" data-act="dealmode">'+(two ? "one card" : "two cards")+'</button>';
@@ -834,9 +826,10 @@ document.addEventListener("click", function(e){
     if(t.repeat){ t.lastDone = todayISO(); t.today = null; t.snooze = todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
     else { t.status="done"; t.doneAt=todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
     ui.dealSkip = 0;
+    if(data.walk) data.walk.offset = 0;
     persist(); render(); } }
   else if(act==="reopen"){ var t2=task(id); if(t2){ t2.status="open"; t2.doneAt=null; persist(); render(); } }
-  else if(act==="snooze"){ var t3=task(id); if(t3){ t3.snooze=todayISO(); t3.snoozeCount=(t3.snoozeCount||0)+1; if(data.pinId===id) data.pinId=null; ui.dealSkip=0; persist(); render(); } }
+  else if(act==="snooze"){ var t3=task(id); if(t3){ t3.snooze=todayISO(); t3.snoozeCount=(t3.snoozeCount||0)+1; if(data.pinId===id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; persist(); render(); } }
   else if(act==="pin"){ data.pinId = id; ui.expanded=null; persist(); render(); }
   else if(act==="today-toggle"){ var tt=task(id); if(tt){ var td=todayISO(); if(tt.today===td){ tt.today=null; } else { tt.today=td; if(tt.snooze===td) tt.snooze=null; } persist(); render(); } }
   else if(act==="unpin"){ data.pinId = null; persist(); render(); }
@@ -918,18 +911,19 @@ document.addEventListener("click", function(e){
       ui.showAdd = false; persist(); render();
     }
   }
-  else if(act==="recdone"){ var r=rec(id); if(r){ r.lastDone=todayISO(); r.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; persist(); render(); } }
-  else if(act==="rec-snooze"){ var rs=rec(id); if(rs){ rs.snooze=todayISO(); rs.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; persist(); render(); } }
+  else if(act==="recdone"){ var r=rec(id); if(r){ r.lastDone=todayISO(); r.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; persist(); render(); } }
+  else if(act==="rec-snooze"){ var rs=rec(id); if(rs){ rs.snooze=todayISO(); rs.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; persist(); render(); } }
   else if(act==="rec-today"){ var rt=rec(id); if(rt){ var td2=todayISO(); if(rt.today===td2){ rt.today=null; } else { rt.today=td2; if(rt.snooze===td2) rt.snooze=null; } persist(); render(); } }
   else if(act==="rec-pin"){ data.pinId = "r:"+id; persist(); render(); }
   else if(act==="rec-unpin"){ data.pinId = null; persist(); render(); }
   else if(act==="redeal0"){ ui.dealSkip = 0; render(); }
-  else if(act==="demote"){
-    if(!data.demote || data.demote.d !== todayISO()) data.demote = { d: todayISO(), seq: [] };
-    data.demote.seq.push(id);
+  else if(act==="walknext"){
+    if(!data.walk || data.walk.d !== todayISO()) data.walk = { d: todayISO(), offset: 0 };
+    data.walk.offset = (data.walk.offset||0) + 1;
     ui.dealSkip = 0;
     persist(); render();
   }
+  else if(act==="walk0"){ data.walk = { d: todayISO(), offset: 0 }; ui.dealSkip = 0; persist(); render(); }
   else if(act==="recdel-ask"){ ui.confirmDel="rec:"+id; render(); }
   else if(act==="recdel-yes"){ data.recurring = data.recurring.filter(function(r){ return r.id!==id; }); ui.confirmDel=null; persist(); render(); }
   else if(act==="onimport"){
