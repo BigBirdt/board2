@@ -37,6 +37,8 @@ body { margin:0; min-height:100vh; background:var(--field); color:var(--ink);
 .savedot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--ok); margin-left:8px; vertical-align:middle; }
 .savedot.err { background:var(--over); }
 .starve { font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--warn); margin:0 0 12px; }
+.starvebtn { background:none; border:none; padding:2px; min-height:28px; color:var(--warn); font:inherit;
+  text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
 .dealctl { display:flex; gap:16px; justify-content:flex-end; margin:-8px 2px 14px; }
 .ghost { background:none; border:none; padding:6px 2px; min-height:32px; font-family:'IBM Plex Mono',monospace;
   font-size:11px; letter-spacing:0.06em; color:var(--mut); opacity:.75; }
@@ -47,6 +49,8 @@ body { margin:0; min-height:100vh; background:var(--field); color:var(--ink);
 .demote { position:absolute; top:8px; right:8px; background:none; border:none; font-family:'IBM Plex Mono',monospace;
   font-size:15px; color:var(--mut); opacity:.55; min-width:32px; min-height:32px; padding:4px; }
 .demote:hover { color:var(--acc); opacity:1; }
+.next.clear { border-left-color:var(--ok); }
+.next.clear .eyebrow { color:var(--ok); }
 .next.feed { border-left-color:var(--warn); }
 .next .eyebrow { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em;
   text-transform:uppercase; color:var(--acc); margin-bottom:2px; }
@@ -257,6 +261,7 @@ var CATS = [
 ];
 var OLDCATS = {}; [["bmF2","campaign"],["cmJj","claim"],["bWFsbGV5","case"],["bWVkaWNhbA==","health"]].forEach(function(p){ OLDCATS[atob(p[0])] = p[1]; });
 var MODES = ["call","email","online","errand","read","decide"];
+var NEEDIDS = ["money","body","house","mind"];
 var RGROUPS = [[atob("bmF2"),"Campaign"],["inside","Inside the house"],["outside","Outside and seasonal"],["vehicles","Vehicles"],["money","Money and bills"],["rhythm","Health and rhythm"]];
 var DEFAULT_NEEDS = function(){
   var t = todayISO();
@@ -356,6 +361,11 @@ function starvingNeeds(){
     var ago = n.lastFed ? daysAgo(n.lastFed) : 999;
     return { n:n, over: ago - n.win };
   }).filter(function(x){ return x.over > 0; }).sort(function(a,b){ return b.over - a.over; });
+}
+function feedPickNeed(nid){
+  var c = poolItems().filter(function(t){ return (t.needs||[]).indexOf(nid) >= 0; })
+    .sort(function(a,b){ return (a.pri||99)-(b.pri||99); });
+  return c[0] || null;
 }
 function feedPick(excludeId){
   var order = data.needs.map(function(n){
@@ -626,7 +636,9 @@ function render(){
   if(ui.inboxDone) h += '<div class="empty" style="padding:0 2px 10px">'+esc(ui.inboxDone)+'</div>';
   var sn = starvingNeeds();
   if(sn.length){
-    h += '<div class="starve">Hungry: '+sn.map(function(x){ return x.n.name+" ("+x.over+"d past window)"; }).join(" · ")+'</div>';
+    h += '<div class="starve">Hungry: ';
+    h += sn.map(function(x){ return '<button class="starvebtn" data-act="feednow" data-id="'+x.n.id+'">'+esc(x.n.name)+' ('+x.over+'d past window)</button>'; }).join(" · ");
+    h += ' <span style="opacity:.7">· tap to feed</span></div>';
   }
 
   var two = !!(data.prefs && data.prefs.dealTwo);
@@ -644,12 +656,25 @@ function render(){
   var dl = deadlineList();
   var wOff = (data.walk && data.walk.d === todayISO()) ? (data.walk.offset||0) : 0;
   var A = dl.length ? dl[wOff % dl.length] : null;
+  var feedT = null;
+  if(ui.feedNeed){ feedT = feedPickNeed(ui.feedNeed); if(!feedT) ui.feedNeed = null; }
+  var todayLeft = dl.filter(function(t){ var e = effDue(t); return e && daysUntil(e) <= 0; }).length;
+  var dayClear = todayLeft === 0;
+  if(dayClear && !pinT && !feedT && !ui.lookAhead){
+    h += '<div class="deal"><div class="next clear">';
+    h += '<div class="eyebrow">Nothing owed</div>';
+    h += '<div class="act">Today\'s list is done. The rest of the day is yours: food, water, daylight, a walk, the dishes, a message to someone, the gym, the workshop, bread, the universe thread. Some of it, none of it, in any order.</div>';
+    h += '<div class="nnote">Nothing here gets tracked or checked off. The pillars are open if the tunnel wants one.</div>';
+    h += '<button class="ghost" data-act="lookahead" style="padding:6px 0">tomorrow\'s list</button>';
+    h += '</div></div>';
+  } else {
   var B = null, solo = null;
   if(two){
     if(pinT){ B = (A && A.id !== pinT.id) ? A : feedPick(pinT.id); A = pinT; }
     else { B = A ? feedPick(A.id) : feedPick(null); }
+    if(feedT && !pinT && (!A || feedT.id !== A.id)) B = feedT;
   } else {
-    solo = pinT || A || feedPick(null);
+    solo = pinT || feedT || A || feedPick(null);
   }
   var canRedeal = !pinT && two && !!B;
   var quiet = '<div class="next"><div class="eyebrow">Next</div><div class="act">Nothing open, or everything is snoozed or waiting. The board is quiet.</div></div>';
@@ -664,11 +689,13 @@ function render(){
   }
   h += '</div>';
   h += '<div class="dealctl">';
+  if(ui.lookAhead && dayClear) h += '<button class="ghost" data-act="lookback">back to done for today</button>';
   if(wOff > 0 && !pinT) h += '<button class="ghost" data-act="walk0">back to the first</button>';
   if((ui.dealSkip||0) > 0) h += '<button class="ghost" data-act="redeal0">back to the first deal</button>';
   if(canRedeal) h += '<button class="ghost" data-act="redeal">deal me a different one</button>';
   h += '<button class="ghost" data-act="dealmode">'+(two ? "one card" : "two cards")+'</button>';
   h += '</div>';
+  }
 
   var dated = poolItems().map(function(t){ return { t:t, e:effDue(t) }; }).filter(function(x){ return x.e; })
     .sort(function(a,b){ return a.e.localeCompare(b.e); }).slice(0,4);
@@ -720,13 +747,13 @@ function render(){
   h += '<div class="empty" style="padding:4px 4px 10px">Tap any card to edit it.</div>';
 
   h += '<div class="chips">';
-  ["all"].concat(MODES).forEach(function(m){
+  ["all"].concat(MODES).concat(NEEDIDS).forEach(function(m){
     h += '<button class="chip'+(ui.filter===m?' on':'')+'" data-act="chip" data-id="'+m+'">'+m+'</button>';
   });
   h += '</div>';
 
   CATS.forEach(function(c){
-    var list = open.filter(function(t){ return t.cat===c.id && (ui.filter==="all" || t.mode===ui.filter); })
+    var list = open.filter(function(t){ return t.cat===c.id && (ui.filter==="all" || t.mode===ui.filter || (t.needs||[]).indexOf(ui.filter)>=0); })
       .sort(function(a,b){ return (a.pri||99)-(b.pri||99); });
     var recs = (ui.filter==="all") ? data.recurring.filter(function(r){ return (r.cat||"general")===c.id; }) : [];
     if(!list.length && !recs.length) return;
@@ -827,9 +854,11 @@ document.addEventListener("click", function(e){
     else { t.status="done"; t.doneAt=todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
     ui.dealSkip = 0;
     if(data.walk) data.walk.offset = 0;
+    ui.feedNeed = null;
+    ui.lookAhead = false;
     persist(); render(); } }
   else if(act==="reopen"){ var t2=task(id); if(t2){ t2.status="open"; t2.doneAt=null; persist(); render(); } }
-  else if(act==="snooze"){ var t3=task(id); if(t3){ t3.snooze=todayISO(); t3.snoozeCount=(t3.snoozeCount||0)+1; if(data.pinId===id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; persist(); render(); } }
+  else if(act==="snooze"){ var t3=task(id); if(t3){ t3.snooze=todayISO(); t3.snoozeCount=(t3.snoozeCount||0)+1; if(data.pinId===id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; ui.feedNeed=null; ui.lookAhead=false; persist(); render(); } }
   else if(act==="pin"){ data.pinId = id; ui.expanded=null; persist(); render(); }
   else if(act==="today-toggle"){ var tt=task(id); if(tt){ var td=todayISO(); if(tt.today===td){ tt.today=null; } else { tt.today=td; if(tt.snooze===td) tt.snooze=null; } persist(); render(); } }
   else if(act==="unpin"){ data.pinId = null; persist(); render(); }
@@ -911,19 +940,22 @@ document.addEventListener("click", function(e){
       ui.showAdd = false; persist(); render();
     }
   }
-  else if(act==="recdone"){ var r=rec(id); if(r){ r.lastDone=todayISO(); r.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; persist(); render(); } }
-  else if(act==="rec-snooze"){ var rs=rec(id); if(rs){ rs.snooze=todayISO(); rs.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; persist(); render(); } }
+  else if(act==="recdone"){ var r=rec(id); if(r){ r.lastDone=todayISO(); r.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; ui.feedNeed=null; ui.lookAhead=false; persist(); render(); } }
+  else if(act==="rec-snooze"){ var rs=rec(id); if(rs){ rs.snooze=todayISO(); rs.today=null; if(data.pinId==="r:"+id) data.pinId=null; ui.dealSkip=0; if(data.walk) data.walk.offset=0; ui.feedNeed=null; ui.lookAhead=false; persist(); render(); } }
   else if(act==="rec-today"){ var rt=rec(id); if(rt){ var td2=todayISO(); if(rt.today===td2){ rt.today=null; } else { rt.today=td2; if(rt.snooze===td2) rt.snooze=null; } persist(); render(); } }
   else if(act==="rec-pin"){ data.pinId = "r:"+id; persist(); render(); }
   else if(act==="rec-unpin"){ data.pinId = null; persist(); render(); }
   else if(act==="redeal0"){ ui.dealSkip = 0; render(); }
+  else if(act==="feednow"){ ui.feedNeed = (ui.feedNeed===id ? null : id); ui.whole = false; render(); }
   else if(act==="walknext"){
     if(!data.walk || data.walk.d !== todayISO()) data.walk = { d: todayISO(), offset: 0 };
     data.walk.offset = (data.walk.offset||0) + 1;
     ui.dealSkip = 0;
     persist(); render();
   }
-  else if(act==="walk0"){ data.walk = { d: todayISO(), offset: 0 }; ui.dealSkip = 0; persist(); render(); }
+  else if(act==="walk0"){ data.walk = { d: todayISO(), offset: 0 }; ui.dealSkip = 0; ui.lookAhead = false; persist(); render(); }
+  else if(act==="lookahead"){ ui.lookAhead = true; render(); }
+  else if(act==="lookback"){ ui.lookAhead = false; if(data.walk) data.walk.offset = 0; render(); }
   else if(act==="recdel-ask"){ ui.confirmDel="rec:"+id; render(); }
   else if(act==="recdel-yes"){ data.recurring = data.recurring.filter(function(r){ return r.id!==id; }); ui.confirmDel=null; persist(); render(); }
   else if(act==="onimport"){
