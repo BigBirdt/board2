@@ -68,7 +68,9 @@ button { font-family:'Inter',sans-serif; cursor:pointer; }
 .bs:hover, .bp:hover { filter:brightness(0.96); }
 .alink { color:var(--acc); font-weight:500; text-decoration:none; border-bottom:1px solid var(--accSoft); }
 .strip { border:1px solid var(--line); border-radius:10px; background:var(--card); padding:10px 14px; margin-bottom:22px; }
-.striprow { display:flex; gap:10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; padding:3px 0; align-items:baseline; }
+.striprow { display:flex; gap:10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; padding:3px 0; align-items:baseline;
+  touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; }
+.striprow.drag { background:var(--accSoft); border-radius:6px; }
 .striprow .d { width:64px; flex:none; color:var(--mut); }
 .striprow .n { flex:1; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .striprow .left { flex:none; }
@@ -300,6 +302,7 @@ function migrate(d){
   if(!d.unknowns) d.unknowns = [];
   if(!d.recurring) d.recurring = [];
   if(!d.prefs) d.prefs = { dealTwo:false };
+  if(d.dayOrder){ var tdp = todayISO(); Object.keys(d.dayOrder).forEach(function(k){ if(k < tdp) delete d.dayOrder[k]; }); }
   if(d.demote) delete d.demote;
   var g2c = { nav:"campaign", inside:"money", outside:"money", vehicles:"vehicles", money:"money", rhythm:"health" };
   d.recurring.forEach(function(r){ if(!r.cat) r.cat = (r.id==="r2" ? "general" : (g2c[r.group] || "general")); });
@@ -351,9 +354,16 @@ function deadlineList(){
     var oa = da<0?-1:0, ob = db<0?-1:0;
     if(oa!==ob) return oa-ob;
     if(da!==db) return da-db;
+    var ra = dayRank(a, ea), rb = dayRank(b, eb);
+    if(ra!==rb) return ra-rb;
     return (a.pri||99)-(b.pri||99);
   });
   return c;
+}
+function dayRank(t, e){
+  if(!e || !data.dayOrder || !data.dayOrder[e]) return 9999;
+  var i = data.dayOrder[e].indexOf(t.id);
+  return i < 0 ? 9999 : i;
 }
 function deadlinePick(){ var l = deadlineList(); return l[0] || null; }
 function starvingNeeds(){
@@ -488,6 +498,10 @@ function rowHtml(t){
     if(t.status==="waiting"){
       h += '<label>Waiting on</label><input type="text" data-field="waitingOn" data-id="'+t.id+'" value="'+esc(t.waitingOn||"")+'">';
     }
+    h += '<label>Runs after, released onto today when that card completes</label><select data-change="after" data-id="'+t.id+'">';
+    h += '<option value=""'+(!t.after?' selected':'')+'>nothing</option>';
+    data.tasks.forEach(function(g){ if(g.id!==t.id && g.status!=="done") h += '<option value="'+esc(g.id)+'"'+(t.after===g.id?' selected':'')+'>'+esc(g.title)+'</option>'; });
+    h += '</select>';
     h += '<div class="editbtns">';
     h += (data.pinId===t.id
       ? '<button class="bs" data-act="unpin" data-id="'+t.id+'">Unpin</button>'
@@ -560,7 +574,7 @@ function mergeItems(pk){
     if(!CAT2NEEDS.hasOwnProperty(mc)) mc = "general";
     var ex = task(nt.id);
     if(ex){
-      ["title","first","note","due","mode","url","waitingOn","pri","repeat"].forEach(function(k){ if(nt[k]!==undefined) ex[k]=nt[k]; });
+      ["title","first","note","due","mode","url","waitingOn","pri","repeat","after"].forEach(function(k){ if(nt[k]!==undefined) ex[k]=nt[k]; });
       if(nt.cat!==undefined) ex.cat = mc;
       if(nt.needs!==undefined) ex.needs = nt.needs;
       if(nt.status!==undefined) ex.status = nt.status;
@@ -568,7 +582,7 @@ function mergeItems(pk){
     } else {
       data.tasks.push({ id:nt.id, cat:mc, pri:nt.pri||30, mode:nt.mode||"decide", status:nt.status||"open",
         due:nt.due||null, title:nt.title||"", first:nt.first||"", note:nt.note||"", url:nt.url,
-        waitingOn:nt.waitingOn, repeat:!!nt.repeat, snoozeCount:0,
+        waitingOn:nt.waitingOn, repeat:!!nt.repeat, after:nt.after, snoozeCount:0,
         needs: nt.needs || ID2NEEDS[nt.id] || CAT2NEEDS[mc] || [] });
       added++;
     }
@@ -697,15 +711,14 @@ function render(){
   h += '</div>';
   }
 
-  var dated = poolItems().map(function(t){ return { t:t, e:effDue(t) }; }).filter(function(x){ return x.e; })
-    .sort(function(a,b){ return a.e.localeCompare(b.e); }).slice(0,4);
+  var dated = deadlineList().map(function(t){ return { t:t, e:effDue(t) }; }).filter(function(x){ return x.e; }).slice(0,4);
   if(dated.length){
     h += '<div class="strip">';
     dated.forEach(function(x){
       var n = daysUntil(x.e);
       var col = n<0 ? "var(--over)" : n<=3 ? "var(--warn)" : "var(--mut)";
       var word = n<0 ? Math.abs(n)+"d over" : n===0 ? "today" : n===1 ? "tomorrow" : n+"d";
-      h += '<div class="striprow"><span class="d">'+esc(shortDate(x.e))+'</span><span class="n">'+esc(x.t.title)+'</span><span class="left" style="color:'+col+'">'+word+'</span></div>';
+      h += '<div class="striprow" data-sid="'+esc(x.t.id)+'" data-day="'+esc(x.e)+'"><span class="d">'+esc(shortDate(x.e))+'</span><span class="n">'+esc(x.t.title)+'</span><span class="left" style="color:'+col+'">'+word+'</span></div>';
     });
     h += '</div>';
   }
@@ -852,6 +865,7 @@ document.addEventListener("click", function(e){
   if(act==="complete"){ var t=task(id); if(t){
     if(t.repeat){ t.lastDone = todayISO(); t.today = null; t.snooze = todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
     else { t.status="done"; t.doneAt=todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
+    data.tasks.forEach(function(w){ if(w.status==="waiting" && w.after===id){ w.status="open"; w.today=todayISO(); } });
     ui.dealSkip = 0;
     if(data.walk) data.walk.offset = 0;
     ui.feedNeed = null;
@@ -868,7 +882,10 @@ document.addEventListener("click", function(e){
   else if(act==="expand"){ ui.expanded = (ui.expanded===id ? null : id); ui.confirmDel=null; render(); }
   else if(act==="collapse"){ ui.expanded=null; ui.confirmDel=null; render(); }
   else if(act==="confirmdel"){ ui.confirmDel=id; render(); }
-  else if(act==="delete"){ data.tasks = data.tasks.filter(function(t){ return t.id!==id; }); ui.expanded=null; ui.confirmDel=null; persist(); render(); }
+  else if(act==="delete"){
+    data.tasks.forEach(function(w){ if(w.status==="waiting" && w.after===id){ w.status="open"; } });
+    data.tasks = data.tasks.filter(function(t){ return t.id!==id; });
+    ui.expanded=null; ui.confirmDel=null; persist(); render(); }
   else if(act==="chip"){ ui.filter=id; render(); }
   else if(act==="cat"){ ui.open[id] = !ui.open[id]; render(); }
   else if(act==="toggle-done"){ ui.showDone = !ui.showDone; render(); }
@@ -970,6 +987,38 @@ document.addEventListener("click", function(e){
   else if(act==="onfresh"){ data = freshSeed(); migrate(data); persist(); render(); }
 });
 
+var dragState = null;
+document.addEventListener("pointerdown", function(e){
+  var row = e.target.closest(".striprow");
+  if(!row || !row.getAttribute("data-sid")) return;
+  dragState = { row: row, day: row.getAttribute("data-day"), moved: false, startY: e.clientY };
+  try { row.setPointerCapture(e.pointerId); } catch(err){}
+});
+document.addEventListener("pointermove", function(e){
+  if(!dragState) return;
+  var row = dragState.row;
+  if(!dragState.moved && Math.abs(e.clientY - dragState.startY) > 4){ dragState.moved = true; row.classList.add("drag"); }
+  if(!dragState.moved) return;
+  e.preventDefault();
+  var sibs = Array.prototype.slice.call(row.parentNode.querySelectorAll('.striprow[data-day="'+dragState.day+'"]'));
+  sibs.forEach(function(s){
+    if(s === row) return;
+    var r = s.getBoundingClientRect();
+    var mid = r.top + r.height / 2;
+    if(e.clientY < mid && (s.compareDocumentPosition(row) & 4)){ s.parentNode.insertBefore(row, s); }
+    else if(e.clientY > mid && (s.compareDocumentPosition(row) & 2)){ s.parentNode.insertBefore(row, s.nextSibling); }
+  });
+}, { passive: false });
+document.addEventListener("pointerup", function(e){
+  if(!dragState) return;
+  var st = dragState; dragState = null;
+  st.row.classList.remove("drag");
+  if(!st.moved) return;
+  var ids = Array.prototype.slice.call(st.row.parentNode.querySelectorAll('.striprow[data-day="'+st.day+'"]')).map(function(s){ return s.getAttribute("data-sid"); });
+  if(!data.dayOrder) data.dayOrder = {};
+  data.dayOrder[st.day] = ids;
+  persist(); render();
+});
 document.addEventListener("input", function(e){
   var el = e.target;
   var f = el.getAttribute("data-field");
@@ -993,6 +1042,11 @@ document.addEventListener("change", function(e){
   var t=task(el.getAttribute("data-id"));
   if(!t) return;
   if(c==="repeatSel"){ t.repeat = (el.value==="yes"); persist(); render(); return; }
+  if(c==="after"){
+    t.after = el.value || null;
+    if(t.after && t.status==="open"){ t.status="waiting"; if(!t.waitingOn){ var g = task(t.after); t.waitingOn = g ? g.title : "its gate card"; } }
+    persist(); render(); return;
+  }
   if(c==="due") t.due = el.value || null;
   else t[c] = el.value;
   persist(); render();
