@@ -161,8 +161,19 @@ function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,
 /* ---------- storage ---------- */
 var mem = null, lsOk = false;
 try { var tk="__t"+Date.now(); window.localStorage.setItem(tk,"1"); window.localStorage.removeItem(tk); lsOk = true; } catch(e){ lsOk = false; }
+var cwsOk = !lsOk && typeof window.storage !== "undefined" && window.storage && window.storage.get;
 function storeGet(){ if(lsOk){ try { return window.localStorage.getItem(KEY); } catch(e){} } return mem; }
-function storeSet(v){ mem = v; if(lsOk){ try { window.localStorage.setItem(KEY, v); return true; } catch(e){ return false; } } return true; }
+function storeSet(v){
+  mem = v;
+  if(lsOk){ try { window.localStorage.setItem(KEY, v); return true; } catch(e){ return false; } }
+  if(cwsOk){ try { window.storage.set(KEY, v).catch(function(){}); } catch(e){} }
+  return true;
+}
+function initLoad(cb){
+  if(lsOk || !cwsOk){ cb(storeGet()); return; }
+  window.storage.get(KEY).then(function(r){ mem = r ? r.value : null; cb(mem); })
+    .catch(function(){ cb(null); });
+}
 
 /* ---------- one back end, encrypted, on a private gist ---------- */
 var SYNCKEY = "board_sync_v1";
@@ -574,7 +585,7 @@ function mergeItems(pk){
     if(!CAT2NEEDS.hasOwnProperty(mc)) mc = "general";
     var ex = task(nt.id);
     if(ex){
-      ["title","first","note","due","mode","url","waitingOn","pri","repeat","after"].forEach(function(k){ if(nt[k]!==undefined) ex[k]=nt[k]; });
+      ["title","first","note","due","mode","url","waitingOn","pri","repeat","after","snoozeCount"].forEach(function(k){ if(nt[k]!==undefined) ex[k]=nt[k]; });
       if(nt.cat!==undefined) ex.cat = mc;
       if(nt.needs!==undefined) ex.needs = nt.needs;
       if(nt.status!==undefined) ex.status = nt.status;
@@ -863,7 +874,7 @@ document.addEventListener("click", function(e){
   var act = el.getAttribute("data-act");
   var id = el.getAttribute("data-id");
   if(act==="complete"){ var t=task(id); if(t){
-    if(t.repeat){ t.lastDone = todayISO(); t.today = null; t.snooze = todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
+    if(t.repeat){ t.lastDone = todayISO(); t.today = null; t.due = null; t.snooze = todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
     else { t.status="done"; t.doneAt=todayISO(); feedNeeds(t); if(data.pinId===id) data.pinId=null; }
     data.tasks.forEach(function(w){ if(w.status==="waiting" && w.after===id){ w.status="open"; w.today=todayISO(); } });
     ui.dealSkip = 0;
@@ -1065,7 +1076,7 @@ function readHashInbox(){
   } catch(e){ ui.inbox = null; }
 }
 (function init(){
-  var raw = storeGet();
+  initLoad(function(raw){
   if(raw){ try { data = JSON.parse(raw); } catch(e){ data = null; } }
   if(data){ migrate(data); }
   readHashInbox();
@@ -1077,6 +1088,7 @@ function readHashInbox(){
   if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
     try { navigator.serviceWorker.register("sw.js"); } catch(e){}
   }
+  });
 })();
 })();
 </script>
