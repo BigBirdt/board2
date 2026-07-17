@@ -773,10 +773,10 @@ function render(){
     var capT = data.tasks.filter(function(t){ return t.status!=="done" && t.due && daysUntil(t.due) >= 0 && daysUntil(t.due) <= W; });
     var capR = data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= 0 && nn <= W; });
     h += '<div class="row"><div class="edit" style="border-top:none">';
-    h += '<div class="enote">Take everything due in the next '+W+' day'+(W===1?'':'s')+' and move it '+S+' day'+(S===1?'':'s')+' later. Recurring beats caught in the window restart from the landing day, one prompt, no pile up. Seasonal anchors stay put.</div>';
-    h += '<label>Window, days ahead to capture: '+W+'</label><input type="range" min="1" max="14" value="'+W+'" data-change="shiftWin" style="width:100%;accent-color:var(--acc)">';
-    h += '<label>Shift, days to move: '+S+'</label><input type="range" min="1" max="14" value="'+S+'" data-change="shiftAmt" style="width:100%;accent-color:var(--acc)">';
-    h += '<div class="enote">'+capT.length+' dated task'+(capT.length===1?'':'s')+' and '+capR.length+' recurring beat'+(capR.length===1?'':'s')+' would move.</div>';
+    h += '<div class="enote">Everything due inside the window moves later by the shift. Recurring beats caught in the window restart from the landing day, one prompt, no pile up. Seasonal anchors stay put.</div>';
+    h += '<label id="shiftwlab">Window, days ahead to capture: '+W+'</label><input type="range" min="1" max="14" value="'+W+'" data-change="shiftWin" style="width:100%;accent-color:var(--acc)">';
+    h += '<label id="shiftalab">Shift, days to move: '+S+'</label><input type="range" min="1" max="14" value="'+S+'" data-change="shiftAmt" style="width:100%;accent-color:var(--acc)">';
+    h += '<div class="enote" id="shiftcount">'+capT.length+' dated task'+(capT.length===1?'':'s')+' and '+capR.length+' recurring beat'+(capR.length===1?'':'s')+' would move.</div>';
     h += '<div class="editbtns"><button class="bp" data-act="shiftgo">Shift it</button><button class="bs" data-act="shift">Close</button></div>';
     h += '</div></div>';
   }
@@ -1053,6 +1053,21 @@ document.addEventListener("pointerup", function(e){
 });
 document.addEventListener("input", function(e){
   var el = e.target;
+  var dc = el.getAttribute("data-change");
+  if(dc==="shiftWin" || dc==="shiftAmt"){
+    var v = parseInt(el.value,10)||7;
+    if(dc==="shiftWin") ui.shiftWin = v; else ui.shiftAmt = v;
+    var lw = document.getElementById("shiftwlab"), la = document.getElementById("shiftalab"), lc = document.getElementById("shiftcount");
+    if(lw) lw.textContent = "Window, days ahead to capture: " + ui.shiftWin;
+    if(la) la.textContent = "Shift, days to move: " + ui.shiftAmt;
+    if(lc){
+      var Wv = ui.shiftWin;
+      var ct = data.tasks.filter(function(t){ return t.status!=="done" && t.due && daysUntil(t.due) >= 0 && daysUntil(t.due) <= Wv; }).length;
+      var cr = data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= 0 && nn <= Wv; }).length;
+      lc.textContent = ct+" dated task"+(ct===1?"":"s")+" and "+cr+" recurring beat"+(cr===1?"":"s")+" would move.";
+    }
+    return;
+  }
   var f = el.getAttribute("data-field");
   if(!f) return;
   if(f==="q"){ var u=unknown(el.getAttribute("data-id")); if(u){ u.a=el.value; var card=el.closest(".qcard"); if(card) card.classList.toggle("qdone", !!u.a.trim()); persist(); } }
@@ -1067,14 +1082,14 @@ document.addEventListener("change", function(e){
   var el = e.target;
   var c = el.getAttribute("data-change");
   if(!c) return;
+  if(c==="shiftWin"){ ui.shiftWin = parseInt(el.value,10)||7; render(); return; }
+  if(c==="shiftAmt"){ ui.shiftAmt = parseInt(el.value,10)||7; render(); return; }
   if(c==="add.cat"){ ui.add.cat=el.value; return; }
   if(c==="add.mode"){ ui.add.mode=el.value; return; }
   if(c==="add.due"){ ui.add.due=el.value; return; }
   if(c==="rec"){ var r=rec(el.getAttribute("data-id")); if(r){ r.lastDone=el.value||null; persist(); render(); } return; }
   var t=task(el.getAttribute("data-id"));
   if(!t) return;
-  if(c==="shiftWin"){ ui.shiftWin = parseInt(el.value,10)||7; render(); return; }
-  if(c==="shiftAmt"){ ui.shiftAmt = parseInt(el.value,10)||7; render(); return; }
   if(c==="repeatSel"){ t.repeat = (el.value==="yes"); persist(); render(); return; }
   if(c==="after"){
     t.after = el.value || null;
