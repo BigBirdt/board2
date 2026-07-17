@@ -329,7 +329,7 @@ function migrate(d){
 /* ---------- state ---------- */
 var data = null;
 var storageOk = true;
-var ui = { filter:"all", expanded:null, confirmDel:null, showAdd:false, showDone:false, whole:false, dealSkip:0,
+var ui = { filter:"all", expanded:null, confirmDel:null, showAdd:false, showDone:false, whole:false, dealSkip:0, shiftOn:false, shiftWin:7, shiftAmt:7,
   open:{ campaign:false, claim:false, "case":false, health:false, money:false, vehicles:false, income:false, projects:false, people:false, pillars:false, general:false, wait:false, q:false, rec:false },
   add:{ title:"", first:"", cat:"general", mode:"call", due:"", needs:"" } };
 var saveTimer = null;
@@ -739,7 +739,7 @@ function render(){
     app.innerHTML = h;
     return;
   }
-  h += '<div style="margin:0 0 4px;display:flex;gap:10px;flex-wrap:wrap"><button class="bs" data-act="today">Back to today</button><button class="bs" data-act="export">Export as text</button><button class="bs" data-act="transfer">Transfer</button><button class="bs" data-act="sync">Sync</button></div>';
+  h += '<div style="margin:0 0 4px;display:flex;gap:10px;flex-wrap:wrap"><button class="bs" data-act="today">Back to today</button><button class="bs" data-act="shift">Shift</button><button class="bs" data-act="export">Export as text</button><button class="bs" data-act="transfer">Transfer</button><button class="bs" data-act="sync">Sync</button></div>';
   if(ui.sync){
     if(!syncCfg){
       h += '<div class="row"><div class="edit" style="border-top:none">';
@@ -767,6 +767,18 @@ function render(){
     h += '<button class="bs" data-act="tradd">Add pasted items</button>';
     h += '</div>';
     if(ui.transferErr) h += '<div class="empty" style="color:var(--over)">'+esc(ui.transferErr)+'</div>';
+  }
+  if(ui.shiftOn){
+    var W = ui.shiftWin, S = ui.shiftAmt;
+    var capT = data.tasks.filter(function(t){ return t.status!=="done" && t.due && daysUntil(t.due) >= 0 && daysUntil(t.due) <= W; });
+    var capR = data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= 0 && nn <= W; });
+    h += '<div class="row"><div class="edit" style="border-top:none">';
+    h += '<div class="enote">Take everything due in the next '+W+' day'+(W===1?'':'s')+' and move it '+S+' day'+(S===1?'':'s')+' later. Recurring beats caught in the window restart from the landing day, one prompt, no pile up. Seasonal anchors stay put.</div>';
+    h += '<label>Window, days ahead to capture: '+W+'</label><input type="range" min="1" max="14" value="'+W+'" data-change="shiftWin" style="width:100%;accent-color:var(--acc)">';
+    h += '<label>Shift, days to move: '+S+'</label><input type="range" min="1" max="14" value="'+S+'" data-change="shiftAmt" style="width:100%;accent-color:var(--acc)">';
+    h += '<div class="enote">'+capT.length+' dated task'+(capT.length===1?'':'s')+' and '+capR.length+' recurring beat'+(capR.length===1?'':'s')+' would move.</div>';
+    h += '<div class="editbtns"><button class="bp" data-act="shiftgo">Shift it</button><button class="bs" data-act="shift">Close</button></div>';
+    h += '</div></div>';
   }
   h += '<div class="empty" style="padding:4px 4px 10px">Tap any card to edit it.</div>';
 
@@ -933,6 +945,15 @@ document.addEventListener("click", function(e){
   }
   else if(act==="syncpullnow"){ syncPull(function(){ render(); }); }
   else if(act==="syncdisc"){ syncCfg = null; saveSyncCfg(); syncState = "off"; syncDecryptFail = false; ui.sync = false; render(); }
+  else if(act==="shift"){ ui.shiftOn = !ui.shiftOn; render(); }
+  else if(act==="shiftgo"){
+    var W2 = ui.shiftWin, S2 = ui.shiftAmt;
+    data.tasks.forEach(function(t){ if(t.status!=="done" && t.due){ var nn = daysUntil(t.due); if(nn >= 0 && nn <= W2){ t.due = addDays(t.due, S2); } } });
+    data.recurring.forEach(function(r){ if(r.anchor) return; var nd = recNextDue(r); if(!nd) return; var nn = daysUntil(nd); if(nn >= 0 && nn <= W2){ r.lastDone = addDays(todayISO(), S2 - r.days); } });
+    ui.shiftOn = false;
+    ui.dealSkip = 0; if(data.walk) data.walk.offset = 0;
+    persist(); render();
+  }
   else if(act==="tradd"){
     var boxA = document.getElementById("transferbox");
     var txtA = boxA ? boxA.value : "";
@@ -1052,6 +1073,8 @@ document.addEventListener("change", function(e){
   if(c==="rec"){ var r=rec(el.getAttribute("data-id")); if(r){ r.lastDone=el.value||null; persist(); render(); } return; }
   var t=task(el.getAttribute("data-id"));
   if(!t) return;
+  if(c==="shiftWin"){ ui.shiftWin = parseInt(el.value,10)||7; render(); return; }
+  if(c==="shiftAmt"){ ui.shiftAmt = parseInt(el.value,10)||7; render(); return; }
   if(c==="repeatSel"){ t.repeat = (el.value==="yes"); persist(); render(); return; }
   if(c==="after"){
     t.after = el.value || null;
