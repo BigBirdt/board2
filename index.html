@@ -660,11 +660,6 @@ function render(){
   }
   if(ui.inboxDone) h += '<div class="empty" style="padding:0 2px 10px">'+esc(ui.inboxDone)+'</div>';
   var sn = starvingNeeds();
-  if(sn.length){
-    h += '<div class="starve">Hungry: ';
-    h += sn.map(function(x){ return '<button class="starvebtn" data-act="feednow" data-id="'+x.n.id+'">'+esc(x.n.name)+' ('+x.over+'d past window)</button>'; }).join(" · ");
-    h += ' <span style="opacity:.7">· tap to feed</span></div>';
-  }
 
   var two = !!(data.prefs && data.prefs.dealTwo);
   var pinT = null;
@@ -731,6 +726,12 @@ function render(){
       var word = n<0 ? Math.abs(n)+"d over" : n===0 ? "today" : n===1 ? "tomorrow" : n+"d";
       h += '<div class="striprow" data-sid="'+esc(x.t.id)+'" data-day="'+esc(x.e)+'"><span class="d">'+esc(shortDate(x.e))+'</span><span class="n">'+esc(x.t.title)+'</span><span class="left" style="color:'+col+'">'+word+'</span></div>';
     });
+    h += '</div>';
+  }
+
+  if(sn.length && !pinT){
+    h += '<div class="dealctl" style="justify-content:flex-start;margin:-14px 2px 14px">';
+    h += sn.map(function(x){ return '<button class="ghost" data-act="feednow" data-id="'+x.n.id+'">'+esc(x.n.name.toLowerCase())+' could use a meal</button>'; }).join('');
     h += '</div>';
   }
 
