@@ -43,6 +43,12 @@ body { margin:0; min-height:100vh; background:var(--field); color:var(--ink);
 .ghost { background:none; border:none; padding:6px 2px; min-height:32px; font-family:'IBM Plex Mono',monospace;
   font-size:11px; letter-spacing:0.06em; color:var(--mut); opacity:.75; }
 .ghost:hover { color:var(--acc); opacity:1; }
+.dtrack { position:relative; height:40px; margin:6px 0 2px; touch-action:none; }
+.dline { position:absolute; left:0; right:0; top:19px; height:2px; background:var(--line); border-radius:1px; }
+.dfill { position:absolute; top:18px; height:4px; background:var(--acc); border-radius:2px; opacity:.5; }
+.dzero { position:absolute; top:14px; width:2px; height:12px; background:var(--mut); opacity:.6; }
+.dknob { position:absolute; top:6px; width:28px; height:28px; margin-left:-14px; border-radius:50%;
+  background:var(--card); border:2px solid var(--acc); box-shadow:0 1px 3px rgba(0,0,0,0.15); }
 .deal { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
 .next { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--acc);
   border-radius:10px; padding:16px 16px 12px; flex:1 1 300px; min-width:0; position:relative; }
@@ -329,7 +335,7 @@ function migrate(d){
 /* ---------- state ---------- */
 var data = null;
 var storageOk = true;
-var ui = { filter:"all", expanded:null, confirmDel:null, showAdd:false, showDone:false, whole:false, dealSkip:0, shiftOn:false, shiftWin:7, shiftAmt:7,
+var ui = { filter:"all", expanded:null, confirmDel:null, showAdd:false, showDone:false, whole:false, dealSkip:0, shiftOn:false, shiftA:0, shiftB:7, shiftD:0,
   open:{ campaign:false, claim:false, "case":false, health:false, money:false, vehicles:false, income:false, projects:false, people:false, pillars:false, general:false, wait:false, q:false, rec:false },
   add:{ title:"", first:"", cat:"general", mode:"call", due:"", needs:"" } };
 var saveTimer = null;
@@ -770,14 +776,18 @@ function render(){
     if(ui.transferErr) h += '<div class="empty" style="color:var(--over)">'+esc(ui.transferErr)+'</div>';
   }
   if(ui.shiftOn){
-    var W = ui.shiftWin, S = ui.shiftAmt;
-    var capT = data.tasks.filter(function(t){ return t.status!=="done" && t.due && daysUntil(t.due) >= 0 && daysUntil(t.due) <= W; });
-    var capR = data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= 0 && nn <= W; });
+    var wa = ui.shiftA, wb = ui.shiftB, D = ui.shiftD;
+    var capT = data.tasks.filter(function(t){ if(t.status==="done" || !t.due) return false; var nn = daysUntil(t.due); return nn >= wa && nn <= wb; });
+    var capR = (D > 0) ? data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= Math.max(0, wa) && nn <= wb; }) : [];
     h += '<div class="row"><div class="edit" style="border-top:none">';
-    h += '<div class="enote">Everything due inside the window moves later by the shift. Recurring beats caught in the window restart from the landing day, one prompt, no pile up. Seasonal anchors stay put.</div>';
-    h += '<label id="shiftwlab">Window, days ahead to capture: '+W+'</label><input type="range" min="1" max="14" value="'+W+'" data-change="shiftWin" style="width:100%;accent-color:var(--acc)">';
-    h += '<label id="shiftalab">Shift, days to move: '+S+'</label><input type="range" min="1" max="14" value="'+S+'" data-change="shiftAmt" style="width:100%;accent-color:var(--acc)">';
-    h += '<div class="enote" id="shiftcount">'+capT.length+' dated task'+(capT.length===1?'':'s')+' and '+capR.length+' recurring beat'+(capR.length===1?'':'s')+' would move.</div>';
+    h += '<div class="enote">Grab a span of days around today, then slide it. Right pushes later. Left moves toward today, floor at today, so overdue gathers into the present instead of deeper into the past. Rhythms ride pushes only, seasonal anchors never move.</div>';
+    h += '<label id="shiftwlab">Window: '+(wa>0?'+':'')+wa+' to '+(wb>0?'+':'')+wb+' days, the tick is today</label>';
+    h += '<div class="dtrack" id="dtrack"><div class="dline"></div><div class="dzero" style="left:50%"></div>';
+    h += '<div class="dfill" id="dfill" style="left:'+((wa+14)/28*100)+'%;width:'+((wb-wa)/28*100)+'%"></div>';
+    h += '<div class="dknob" data-knob="A" id="knobA" style="left:'+((wa+14)/28*100)+'%"></div>';
+    h += '<div class="dknob" data-knob="B" id="knobB" style="left:'+((wb+14)/28*100)+'%"></div></div>';
+    h += '<label id="shiftalab">'+(D>0 ? 'Move: +'+D+' days later' : D<0 ? 'Move: '+D+' days toward today' : 'Move: 0, nothing happens yet')+'</label><input type="range" min="-14" max="14" value="'+D+'" data-change="shiftD" style="width:100%;accent-color:var(--acc)">';
+    h += '<div class="enote" id="shiftcount">'+capT.length+' dated task'+(capT.length===1?'':'s')+(D>0 ? ' and '+capR.length+' recurring beat'+(capR.length===1?'':'s') : '')+' in the window.</div>';
     h += '<div class="editbtns"><button class="bp" data-act="shiftgo">Shift it</button><button class="bs" data-act="shift">Close</button></div>';
     h += '</div></div>';
   }
@@ -948,35 +958,19 @@ document.addEventListener("click", function(e){
   else if(act==="syncdisc"){ syncCfg = null; saveSyncCfg(); syncState = "off"; syncDecryptFail = false; ui.sync = false; render(); }
   else if(act==="shift"){ ui.shiftOn = !ui.shiftOn; render(); }
   else if(act==="shiftgo"){
-    var W2 = ui.shiftWin, S2 = ui.shiftAmt;
-    data.tasks.forEach(function(t){ if(t.status!=="done" && t.due){ var nn = daysUntil(t.due); if(nn >= 0 && nn <= W2){ t.due = addDays(t.due, S2); } } });
-    data.recurring.forEach(function(r){ if(r.anchor) return; var nd = recNextDue(r); if(!nd) return; var nn = daysUntil(nd); if(nn >= 0 && nn <= W2){ r.lastDone = addDays(todayISO(), S2 - r.days); } });
-    ui.shiftOn = false;
-    ui.dealSkip = 0; if(data.walk) data.walk.offset = 0;
-    persist(); render();
-  }
-  else if(act==="tradd"){
-    var boxA = document.getElementById("transferbox");
-    var txtA = boxA ? boxA.value : "";
-    try {
-      var pk = JSON.parse(txtA);
-      var res = mergeItems(pk);
-      ui.transferErr = "Added "+res.added+", updated "+res.updated+".";
-      migrate(data); persist(); render();
-    } catch(err){ ui.transferErr = "Could not read that as items."; render(); }
-  }
-  else if(act==="inbox-add"){
-    if(ui.inbox){
-      try {
-        var res2 = mergeItems(ui.inbox);
-        migrate(data); persist();
-        ui.inboxDone = "Added "+res2.added+", updated "+res2.updated+".";
-      } catch(e){ ui.inboxDone = "Could not read those items."; }
-      ui.inbox = null; render();
-      setTimeout(function(){ ui.inboxDone = null; render(); }, 4000);
+    var wa2 = ui.shiftA, wb2 = ui.shiftB, D2 = ui.shiftD;
+    if(D2 !== 0){
+      data.tasks.forEach(function(t){ if(t.status!=="done" && t.due){ var nn = daysUntil(t.due); if(nn >= wa2 && nn <= wb2){
+        var nd2 = addDays(t.due, D2);
+        t.due = (D2 < 0 && daysUntil(nd2) < 0) ? todayISO() : nd2;
+      } } });
+      if(D2 > 0) data.recurring.forEach(function(r){ if(r.anchor) return; var nd = recNextDue(r); if(!nd) return; var nn = daysUntil(nd); if(nn >= Math.max(0, wa2) && nn <= wb2){ r.lastDone = addDays(todayISO(), D2 - r.days); } });
+      ui.dealSkip = 0; if(data.walk) data.walk.offset = 0;
+      persist();
     }
+    ui.shiftOn = false;
+    render();
   }
-  else if(act==="inbox-no"){ ui.inbox = null; render(); }
   else if(act==="editnext"){ var te=task(id); if(te){ ui.whole=true; ui.open[te.cat]=true; ui.expanded=id; render(); } }
   else if(act==="add-open"){ ui.showAdd=true; render(); }
   else if(act==="add-cancel"){ ui.showAdd=false; render(); }
@@ -1020,14 +1014,49 @@ document.addEventListener("click", function(e){
   else if(act==="onfresh"){ data = freshSeed(); migrate(data); persist(); render(); }
 });
 
+function updateShiftUI(){
+  var wa = ui.shiftA, wb = ui.shiftB;
+  var kA = document.getElementById("knobA"), kB = document.getElementById("knobB"), df = document.getElementById("dfill");
+  if(kA) kA.style.left = ((wa+14)/28*100)+"%";
+  if(kB) kB.style.left = ((wb+14)/28*100)+"%";
+  if(df){ df.style.left = ((wa+14)/28*100)+"%"; df.style.width = ((wb-wa)/28*100)+"%"; }
+  var lw = document.getElementById("shiftwlab"), la = document.getElementById("shiftalab"), lc = document.getElementById("shiftcount");
+  if(lw) lw.textContent = "Window: "+(wa>0?"+":"")+wa+" to "+(wb>0?"+":"")+wb+" days, the tick is today";
+  if(la) la.textContent = ui.shiftD>0 ? "Move: +"+ui.shiftD+" days later" : ui.shiftD<0 ? "Move: "+ui.shiftD+" days toward today" : "Move: 0, nothing happens yet";
+  if(lc){
+    var ct = data.tasks.filter(function(t){ return t.status!=="done" && t.due && daysUntil(t.due) >= wa && daysUntil(t.due) <= wb; }).length;
+    var cr = (ui.shiftD > 0) ? data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= Math.max(0, wa) && nn <= wb; }).length : 0;
+    lc.textContent = ct+" dated task"+(ct===1?"":"s")+(ui.shiftD>0 ? " and "+cr+" recurring beat"+(cr===1?"":"s") : "")+" in the window.";
+  }
+}
+var dragKnob = null;
 var dragState = null;
 document.addEventListener("pointerdown", function(e){
+  var kn = e.target.closest(".dknob");
+  if(kn){
+    dragKnob = kn.getAttribute("data-knob");
+    try { kn.setPointerCapture(e.pointerId); } catch(err){}
+    return;
+  }
   var row = e.target.closest(".striprow");
   if(!row || !row.getAttribute("data-sid")) return;
   dragState = { row: row, day: row.getAttribute("data-day"), moved: false, startY: e.clientY };
   try { row.setPointerCapture(e.pointerId); } catch(err){}
 });
 document.addEventListener("pointermove", function(e){
+  if(dragKnob){
+    e.preventDefault();
+    var tr = document.getElementById("dtrack");
+    if(tr){
+      var r = tr.getBoundingClientRect();
+      var v = Math.round(-14 + (e.clientX - r.left) / r.width * 28);
+      if(v < -14) v = -14; if(v > 14) v = 14;
+      if(dragKnob === "A"){ ui.shiftA = Math.min(v, ui.shiftB); }
+      else { ui.shiftB = Math.max(v, ui.shiftA); }
+      updateShiftUI();
+    }
+    return;
+  }
   if(!dragState) return;
   var row = dragState.row;
   if(!dragState.moved && Math.abs(e.clientY - dragState.startY) > 4){ dragState.moved = true; row.classList.add("drag"); }
@@ -1043,6 +1072,7 @@ document.addEventListener("pointermove", function(e){
   });
 }, { passive: false });
 document.addEventListener("pointerup", function(e){
+  if(dragKnob){ dragKnob = null; return; }
   if(!dragState) return;
   var st = dragState; dragState = null;
   st.row.classList.remove("drag");
@@ -1055,18 +1085,9 @@ document.addEventListener("pointerup", function(e){
 document.addEventListener("input", function(e){
   var el = e.target;
   var dc = el.getAttribute("data-change");
-  if(dc==="shiftWin" || dc==="shiftAmt"){
-    var v = parseInt(el.value,10)||7;
-    if(dc==="shiftWin") ui.shiftWin = v; else ui.shiftAmt = v;
-    var lw = document.getElementById("shiftwlab"), la = document.getElementById("shiftalab"), lc = document.getElementById("shiftcount");
-    if(lw) lw.textContent = "Window, days ahead to capture: " + ui.shiftWin;
-    if(la) la.textContent = "Shift, days to move: " + ui.shiftAmt;
-    if(lc){
-      var Wv = ui.shiftWin;
-      var ct = data.tasks.filter(function(t){ return t.status!=="done" && t.due && daysUntil(t.due) >= 0 && daysUntil(t.due) <= Wv; }).length;
-      var cr = data.recurring.filter(function(r){ if(r.anchor) return false; var nd = recNextDue(r); if(!nd) return false; var nn = daysUntil(nd); return nn >= 0 && nn <= Wv; }).length;
-      lc.textContent = ct+" dated task"+(ct===1?"":"s")+" and "+cr+" recurring beat"+(cr===1?"":"s")+" would move.";
-    }
+  if(dc==="shiftD"){
+    ui.shiftD = parseInt(el.value,10)||0;
+    updateShiftUI();
     return;
   }
   var f = el.getAttribute("data-field");
@@ -1083,8 +1104,7 @@ document.addEventListener("change", function(e){
   var el = e.target;
   var c = el.getAttribute("data-change");
   if(!c) return;
-  if(c==="shiftWin"){ ui.shiftWin = parseInt(el.value,10)||7; render(); return; }
-  if(c==="shiftAmt"){ ui.shiftAmt = parseInt(el.value,10)||7; render(); return; }
+  if(c==="shiftD"){ render(); return; }
   if(c==="add.cat"){ ui.add.cat=el.value; return; }
   if(c==="add.mode"){ ui.add.mode=el.value; return; }
   if(c==="add.due"){ ui.add.due=el.value; return; }
