@@ -737,7 +737,8 @@ function render(){
 
   if(sn.length && !pinT){
     h += '<div class="dealctl" style="justify-content:flex-start;margin:-14px 2px 14px">';
-    h += sn.map(function(x){ return '<button class="ghost" data-act="feednow" data-id="'+x.n.id+'">'+esc(x.n.name.toLowerCase())+' could use a meal</button>'; }).join('');
+    h += sn.map(function(x){ return '<button class="ghost" data-act="feednow" data-id="'+x.n.id+'">'+esc(x.n.name.toLowerCase())+'</button>'; }).join('<span class="ghost" style="opacity:.5;padding:6px 0">\u00b7</span>');
+    h += '<span class="ghost" style="padding:6px 0">could use a meal</span>';
     h += '</div>';
   }
 
@@ -971,6 +972,28 @@ document.addEventListener("click", function(e){
     ui.shiftOn = false;
     render();
   }
+  else if(act==="tradd"){
+    var boxA = document.getElementById("transferbox");
+    var txtA = boxA ? boxA.value : "";
+    try {
+      var pk = JSON.parse(txtA);
+      var res = mergeItems(pk);
+      ui.transferErr = "Added "+res.added+", updated "+res.updated+".";
+      migrate(data); persist(); render();
+    } catch(err){ ui.transferErr = "Could not read that as items."; render(); }
+  }
+  else if(act==="inbox-add"){
+    if(ui.inbox){
+      try {
+        var res2 = mergeItems(ui.inbox);
+        migrate(data); persist();
+        ui.inboxDone = "Added "+res2.added+", updated "+res2.updated+".";
+      } catch(e){ ui.inboxDone = "Could not read those items."; }
+      ui.inbox = null; render();
+      setTimeout(function(){ ui.inboxDone = null; render(); }, 4000);
+    }
+  }
+  else if(act==="inbox-no"){ ui.inbox = null; render(); }
   else if(act==="editnext"){ var te=task(id); if(te){ ui.whole=true; ui.open[te.cat]=true; ui.expanded=id; render(); } }
   else if(act==="add-open"){ ui.showAdd=true; render(); }
   else if(act==="add-cancel"){ ui.showAdd=false; render(); }
