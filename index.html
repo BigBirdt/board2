@@ -554,6 +554,7 @@ function rowHtml(t){
       ? '<button class="bs" data-act="unpin" data-id="'+t.id+'">Unpin</button>'
       : '<button class="bp" data-act="pin" data-id="'+t.id+'">Put this up next</button>');
     if(t.snooze === todayISO() && t.status === "open") h += '<button class="bp" data-act="unsnooze" data-id="'+t.id+'">Bring it back today</button>';
+    h += '<button class="bs" data-act="dup" data-id="'+t.id+'">Duplicate</button>';
     h += '<button class="bs" data-act="collapse">Close</button>';
     h += (ui.confirmDel===t.id
       ? '<button class="bdanger" data-act="delete" data-id="'+t.id+'">Really delete</button>'
@@ -964,6 +965,24 @@ document.addEventListener("click", function(e){
   else if(act==="redeal"){ ui.dealSkip = (ui.dealSkip||0)+1; render(); }
   else if(act==="dealmode"){ data.prefs = data.prefs || {}; data.prefs.dealTwo = !data.prefs.dealTwo; persist(); render(); }
   else if(act==="expand"){ ui.expanded = (ui.expanded===id ? null : id); ui.confirmDel=null; render(); }
+  else if(act==="dup"){
+    var srcT = task(id);
+    if(srcT){
+      var cp = { id: "x" + Date.now(), status: "open", snoozeCount: 0,
+        title: (srcT.title || "") + " copy", first: srcT.first || "", note: srcT.note || "",
+        due: srcT.due || null, mode: srcT.mode, cat: srcT.cat, url: srcT.url || "",
+        pri: srcT.pri || 0, repeat: !!srcT.repeat,
+        needs: (srcT.needs || []).slice() };
+      var at = data.tasks.length;
+      for(var di = 0; di < data.tasks.length; di++){ if(data.tasks[di].id === id){ at = di + 1; break; } }
+      data.tasks.splice(at, 0, cp);
+      ui.expanded = cp.id;
+      ui.confirmDel = null;
+      if(!ui.whole){ ui.whole = true; }
+      ui.open[cp.cat] = true;
+      persist(); render();
+    }
+  }
   else if(act==="collapse"){ ui.expanded=null; ui.confirmDel=null; render(); }
   else if(act==="confirmdel"){ ui.confirmDel=id; render(); }
   else if(act==="delete"){
